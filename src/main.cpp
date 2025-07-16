@@ -25,15 +25,33 @@ ez::Drive chassis(
 // ez::tracking_wheel horiz_tracker(8, 2.75, 4.0);  // This tracking wheel is perpendicular to the drive wheels
 // ez::tracking_wheel vert_tracker(9, 2.75, 4.0);   // This tracking wheel is parallel to the drive wheels
 
+
+
+void gpsupdate(){
+ // return; // Comment this out if you want to use GPS
+  
+  while(true){
+    // gpsData = gps1.get_data();
+    // chassis.odom_xy_set(gpsData.x, gpsData.y);
+    chassis.odom_xy_set(gps1.get_position_x() * 39.3701, gps1.get_position_y() * 39.3701);
+    pros::delay(500); // Add a small delay to prevent high CPU usage
+  }
+}
+
+
+
+
 /**
  * Runs initialization code. This occurs as soon as the program is started.
  *
  * All other competition modes are blocked by initialize; it is recommended
  * to keep execution time for this mode under a few seconds.
  */
+
 void initialize() {
   // Print our branding over your terminal :D
   ez::ez_template_print();
+  //pros::Task background_task(gpsupdate); 
 
   pros::delay(500);  // Stop the user from doing anything while legacy ports configure
 
@@ -60,6 +78,7 @@ void initialize() {
 
   // Autonomous Selector using LLEMU
   ez::as::auton_selector.autons_add({
+      {"Localization Test\n\nThis will drive the bot to 2 points using ptp", localization_test},
       {"Simple Odom\n\nThis is the same as the drive example, but it uses odom instead!", odom_drive_example},
       {"Drive\n\nDrive forward and come back", drive_example},
       {"Turn\n\nTurn 3 times.", turn_example},
@@ -264,4 +283,11 @@ void opcontrol() {
 
     pros::delay(ez::util::DELAY_TIME);  // This is used for timer calculations!  Keep this ez::util::DELAY_TIME
   }
+
 }
+
+
+
+
+
+

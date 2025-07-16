@@ -11,3 +11,4 @@ extern Drive chassis;
 // inline pros::adi::DigitalIn limit_switch('A');
 
 inline ez::Piston mogo_clamp('A');
+inline pros::Gps gps1(8, 0, 0.1397, 0);

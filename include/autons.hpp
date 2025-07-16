@@ -17,3 +17,4 @@ void odom_boomerang_example();
 void odom_boomerang_injected_pure_pursuit_example();
 void measure_offsets();
 void testaut();
+void localization_test();

@@ -237,7 +237,13 @@ void interfered_example() {
   chassis.pid_wait();
 }
 
+void callgps(){
+  // This is used to call the gpsupdate task
+  // It is called in initialize() so that the GPS can be updated in the background
+  // while the robot is running.
 
+  chassis.odom_xy_set(gps1.get_position_x() * 39.3701, gps1.get_position_y() * 39.3701);
+}
 
 ///
 // Odom Drive PID
@@ -246,24 +252,34 @@ void odom_drive_example() {
   // This works the same as pid_drive_set, but it uses odom instead!
   // You can replace pid_drive_set with pid_odom_set and your robot will
   // have better error correction.
+  gps1.set_position(-1.2192, -1.2192, 0);  // Set GPS position to -48, -24, 0
+
+  chassis.odom_xy_set(-48_in, -48_in);  // Reset odom position to 0, 0
+  //pros::delay(1000);  // Wait a second before the next motion
+ 
+
+
+
 
   chassis.pid_odom_set(24_in, DRIVE_SPEED, true);
   chassis.pid_wait();
+  callgps();
 
-  pros::delay(2000);  // Wait a second before the next motion
-  mogo_clamp.set(true);  // Set clamp to true before driving back
-
-  chassis.pid_odom_set(-12_in, DRIVE_SPEED);
-  chassis.pid_wait();
-
-
-  pros::delay(2000);  // Wait a second before the next motion
-  mogo_clamp.set(false);  // Set clamp to false before driving back
+ // pros::delay(2000);  // Wait a second before the next motion
+  //mogo_clamp.set(true);  // Set clamp to true before driving back
 
   chassis.pid_odom_set(-12_in, DRIVE_SPEED);
   chassis.pid_wait();
+  callgps();
 
-  mogo_clamp.set(true);  // Set clamp to true before driving back
+ // pros::delay(2000);  // Wait a second before the next motion
+  //mogo_clamp.set(false);  // Set clamp to false before driving back
+
+  chassis.pid_odom_set(-12_in, DRIVE_SPEED);
+  chassis.pid_wait();
+  callgps();
+
+  //mogo_clamp.set(true);  // Set clamp to true before driving back
   
 }
 
@@ -405,5 +421,35 @@ void testaut() {
   chassis.pid_odom_set({{24_in, -12_in, -135_deg}, rev, 110});
   chassis.pid_wait();
   mogo_clamp.set(false);
+}
 
+
+
+
+void gps_example() {
+  // Move the robot forward 60 inches using odometry
+  chassis.pid_odom_set(24, DRIVE_SPEED, true);
+  chassis.pid_wait();
+
+  // Check the current location with GPS
+  // Move the robot backward -60 inches using odometry
+  chassis.pid_odom_set(-12_in, DRIVE_SPEED, true);
+  chassis.pid_wait();
+
+}
+
+
+void localization_test(){
+gps1.set_position( 0.0254 * -24, 0.0254 * -48, 0);  // Set GPS position to -48, -24, 0
+
+chassis.odom_xy_set(-24_in, -48_in);  // Reset odom position to 0, 0
+  //pros::delay(1000);  // Wait a second before the next motion
+ 
+ chassis.pid_odom_ptp_set({{-48_in, 0_in}, fwd, 110}, true);
+  chassis.pid_wait();
+  callgps();
+
+  chassis.pid_odom_ptp_set({{0_in, 48_in}, fwd, 110}, true);
+  chassis.pid_wait();
+  callgps();
 }

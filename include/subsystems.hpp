@@ -12,3 +12,4 @@ extern Drive chassis;
 
 inline ez::Piston mogo_clamp('A');
 inline pros::Gps gps1(8, 0, 0.1397, 0);
+inline pros::Distance distance_sensor(3);

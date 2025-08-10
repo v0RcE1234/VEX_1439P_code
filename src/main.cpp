@@ -133,7 +133,7 @@ void initialize() {
   // Print our branding over your terminal :D
   ez::ez_template_print();
   //pros::Task background_task(gpsupdate); 
-  pros::Task distance_sensor_task(distance_sensor_update);
+  // pros::Task distance_sensor_task(distance_sensor_update);
 
   pros::delay(500);  // Stop the user from doing anything while legacy ports configure
 
@@ -367,6 +367,87 @@ void opcontrol() {
   }
 
 }
+
+void mcl() {
+  //constants
+  const int NUM_PARTICLES = 50;
+  const double SIGMA = 2.0; //Assumed standard deviation of the sensor noise in inches
+
+  // particle structure: [x, y, weight]
+  // no theta, since we assume the imu is always correct
+  typedef struct particle {
+    double x;
+    double y;
+    double weight;
+  } particle;
+
+  // initilization
+  particle particle_array[NUM_PARTICLES];
+  for (int i = 0; i < NUM_PARTICLES; i++) {
+    double x = rand() * 144 - 72; // Random x position between -72 and 72
+    double y = rand() * 144 - 72; // Random y position between -72 and 72
+    double weight = 1.0 / NUM_PARTICLES; // Initial weight is uniform
+    particle_array[i] = {x, y, weight};
+  }
+  // Main loop
+  while(true){
+    //step 1: get robot movement and initial heading
+    double delta_distance = get_forward_movement_from_encoders(); // Get the forward movement from encoders
+    double robot_heading = (90 - chassis.odom_theta_get()) * M_PI/180; // Get the robot's heading from the IMU
+    
+    //step 2: motion update
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+      particle p = particle_array[i];
+      double x = p.x;
+      double y = p.y;
+      double w = p.weight;
+      // add some noise to the distance moved
+      double noisy_distance = delta_distance + random_gaussian(0, 0.5);
+      double dx = noisy_distance * cos(robot_heading);
+      double dy = noisy_distance * sin(robot_heading);
+      p.x += dx;
+      p.y += dy;
+    }
+
+
+    //step 3: simulate sensor values from this pose, weighting
+    double total_weight = 0.0;
+    for(int i = 0; i < NUM_PARTICLES; i++) {
+      particle p = particle_array[i];
+      double x = p.x;
+      double y = p.y;
+      double theta = robot_heading;
+      
+      double weight = 1.0;
+      double distance_sensor_error = distance_sensor.get() / 25.4 - simulate_distance_sensor(x, y, theta); // Convert mm to inches
+      double prob = gaussian(distance_sensor_error, 0, SIGMA); // Calculate the probability of the sensor value given the pose
+      weight *= prob; // Update the weight of the particle 
+      
+      p.weight = weight; // Update the particle's weight 
+    }
+
+    //step 4: normalize weights
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+      particle p = particle_array[i];
+      p.weight /= total_weight; // Normalize the weight
+    }
+    
+    //step 5: resample particles
+    particle new_particles[NUM_PARTICLES];
+    double cummilative_weights[NUM_PARTICLES];
+    double cummulative_weight = 0.0;
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+      particle p = particle_array[i];
+      cummulative_weight += p.weight;
+      cummilative_weights[i] = cummulative_weight;
+    }
+
+
+
+
+// unfinished
+  
+
 
 
 

@@ -38,6 +38,87 @@ void gpsupdate(){
   }
 }
 
+void distance_sensor_update() {
+  // This function uses our estimated pose from ez templates built in odometry
+  // to determine which wall the robot is facing. Then using the distance
+  // sensor value, it can update one of the coordinates, since trigonometry
+  // can give us the coordinate perpendicular to the wall.
+
+  // Sensor offset from robot center (in inches)
+  const double sensor_offset_x = -3;
+  const double sensor_offset_y = -4.75;
+  const double sensor_angle_offset_deg = 180;
+
+  const double FIELD_HALF = 72.0; // Half field size in inches
+  while (true) {
+    double robot_x = chassis.odom_x_get();
+    double robot_y = chassis.odom_y_get();
+    double robot_theta_deg = chassis.odom_theta_get();
+    double robot_theta_rad = robot_theta_deg * M_PI / 180.0;
+
+    // Calculate sensor's global position, -robot_theta_rad is used since 
+    // robot_theta_rad is the clockwise angle but the rotation formulas
+    // assume counter-clockwise rotation.
+    double sensor_global_x = robot_x + sensor_offset_x * cos(-robot_theta_rad) - sensor_offset_y * sin(-robot_theta_rad);
+    double sensor_global_y = robot_y + sensor_offset_x * sin(-robot_theta_rad) + sensor_offset_y * cos(-robot_theta_rad);
+
+    // Calculate sensor's global heading
+    double sensor_global_theta_rad = robot_theta_rad + sensor_angle_offset_deg * M_PI / 180.0;
+
+    double dist_mm = distance_sensor.get(); // Returns mm
+    // VEX distance sensor valid range from website: 20mm to 2000mm
+    if (dist_mm < 20 || dist_mm > 2000) {
+      pros::delay(100);
+      continue; // Skip this iteration if the value is invalid
+    }
+    double dist = dist_mm / 25.4; // Convert mm to inches
+
+    // Calculate the direction vector based on the robot's orientation.
+    // This is a unit vector (length = 1) showing the direction the robot is facing.
+    double dx = sin(sensor_global_theta_rad);
+    double dy = cos(sensor_global_theta_rad);
+
+    // Calculate intersection t for each wall
+    double t_top = (FIELD_HALF - sensor_global_y) / dy;
+    double t_bottom = (-FIELD_HALF - sensor_global_y) / dy;
+    double t_right = (FIELD_HALF - sensor_global_x) / dx;
+    double t_left = (-FIELD_HALF - sensor_global_x) / dx;
+
+    // Find the closest wall in front of the robot
+    double t_min = 1000000.0; // Initialize to a large value
+    std::string wall = "";
+    if (t_top > 0 && t_top < t_min) { t_min = t_top; wall = "top"; }
+    if (t_bottom > 0 && t_bottom < t_min) { t_min = t_bottom; wall = "bottom"; }
+    if (t_right > 0 && t_right < t_min) { t_min = t_right; wall = "right"; }
+    if (t_left > 0 && t_left < t_min) { t_min = t_left; wall = "left"; }
+
+    // Update the perpendicular coordinate using the sensor value
+    // Vector points towards the wall, so subtract the distance
+    // times the direction vector to get the coordinate
+    if (wall == "top") {
+      sensor_global_y = FIELD_HALF - dist * dy;
+    } else if (wall == "bottom") {
+      sensor_global_y = -FIELD_HALF - dist * dy;
+    } else if (wall == "right") {
+      sensor_global_x = FIELD_HALF - dist * dx;
+    } else if (wall == "left") {
+      sensor_global_x = -FIELD_HALF - dist * dx;
+    }
+
+    // Debug print: which wall is detected and the distance
+    ez::screen_print(std::string("Wall:") + wall + " Dist: " + std::to_string(dist) + " in", 6);
+
+    // Convert sensor global position back to robot center, -robot_theta_rad is used since 
+    // robot_theta_rad is the clockwise angle but the rotation formulas
+    // assume counter-clockwise rotation.
+    double updated_robot_x = sensor_global_x - (sensor_offset_x * cos(-robot_theta_rad) - sensor_offset_y * sin(-robot_theta_rad));
+    double updated_robot_y = sensor_global_y - (sensor_offset_x * sin(-robot_theta_rad) + sensor_offset_y * cos(-robot_theta_rad));
+
+    chassis.odom_xy_set(updated_robot_x, updated_robot_y);
+    pros::delay(100);
+  }
+}
+
 
 
 
@@ -52,6 +133,7 @@ void initialize() {
   // Print our branding over your terminal :D
   ez::ez_template_print();
   //pros::Task background_task(gpsupdate); 
+  pros::Task distance_sensor_task(distance_sensor_update);
 
   pros::delay(500);  // Stop the user from doing anything while legacy ports configure
 

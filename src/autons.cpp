@@ -252,7 +252,7 @@ void odom_drive_example() {
   // This works the same as pid_drive_set, but it uses odom instead!
   // You can replace pid_drive_set with pid_odom_set and your robot will
   // have better error correction.
-  gps1.set_position(-1.2192, -1.2192, 0);  // Set GPS position to -48, -24, 0
+  // gps1.set_position(-1.2192, -1.2192, 0);  // Set GPS position to -48, -24, 0
 
   chassis.odom_xy_set(-48_in, -48_in);  // Reset odom position to 0, 0
   //pros::delay(1000);  // Wait a second before the next motion
@@ -263,21 +263,21 @@ void odom_drive_example() {
 
   chassis.pid_odom_set(24_in, DRIVE_SPEED, true);
   chassis.pid_wait();
-  callgps();
+  // callgps();
 
  // pros::delay(2000);  // Wait a second before the next motion
   //mogo_clamp.set(true);  // Set clamp to true before driving back
 
   chassis.pid_odom_set(-12_in, DRIVE_SPEED);
   chassis.pid_wait();
-  callgps();
+  // callgps();
 
  // pros::delay(2000);  // Wait a second before the next motion
   //mogo_clamp.set(false);  // Set clamp to false before driving back
 
   chassis.pid_odom_set(-12_in, DRIVE_SPEED);
   chassis.pid_wait();
-  callgps();
+  // callgps();
 
   //mogo_clamp.set(true);  // Set clamp to true before driving back
   
@@ -440,16 +440,16 @@ void gps_example() {
 
 
 void localization_test(){
-gps1.set_position( 0.0254 * -24, 0.0254 * -48, 0);  // Set GPS position to -48, -24, 0
+// gps1.set_position( 0.0254 * -24, 0.0254 * -48, 0);  // Set GPS position to -48, -24, 0
 
 chassis.odom_xy_set(-24_in, -48_in);  // Reset odom position to 0, 0
   //pros::delay(1000);  // Wait a second before the next motion
  
  chassis.pid_odom_ptp_set({{-48_in, 0_in}, fwd, 110}, true);
   chassis.pid_wait();
-  callgps();
+  // callgps();
 
   chassis.pid_odom_ptp_set({{0_in, 48_in}, fwd, 110}, true);
   chassis.pid_wait();
-  callgps();
+  // callgps();
 }

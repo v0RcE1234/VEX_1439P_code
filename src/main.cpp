@@ -10,8 +10,8 @@
 // Chassis constructor
 ez::Drive chassis(
     // These are your drive motors, the first motor is used for sensing!
-    {-13, -1, -11},     // Left Chassis Ports (negative port will reverse it!)
-    {10, 19, 20},  // Right Chassis Ports (negative port will reverse it!)
+    {-20, -3, -1},     // Left Chassis Ports (negative port will reverse it!)
+    {10, 13, 11},  // Right Chassis Ports (negative port will reverse it!)
 
     6,      // IMU Port
     3.25,  // Wheel Diameter (Remember, 4" wheels without screw holes are actually 4.125!)
@@ -133,7 +133,7 @@ void initialize() {
   // Print our branding over your terminal :D
   ez::ez_template_print();
   //pros::Task background_task(gpsupdate); 
-  pros::Task distance_sensor_task(distance_sensor_update);
+  // pros::Task distance_sensor_task(distance_sensor_update);
 
   pros::delay(500);  // Stop the user from doing anything while legacy ports configure
 
@@ -362,6 +362,16 @@ void opcontrol() {
     // . . .
 
     mogo_clamp.button_toggle(master.get_digital(DIGITAL_X));
+
+    if (master.get_digital(DIGITAL_L1)) {
+      intake.move(127);
+    } 
+    else if (master.get_digital(DIGITAL_L2)) {
+      intake.move(-127);
+    } 
+    else {
+      intake.move(0);
+    }
 
     pros::delay(ez::util::DELAY_TIME);  // This is used for timer calculations!  Keep this ez::util::DELAY_TIME
   }

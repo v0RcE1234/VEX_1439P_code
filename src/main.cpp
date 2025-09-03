@@ -10,8 +10,8 @@
 // Chassis constructor
 ez::Drive chassis(
     // These are your drive motors, the first motor is used for sensing!
-    {-13, -1, -11},     // Left Chassis Ports (negative port will reverse it!)
-    {10, 19, 20},  // Right Chassis Ports (negative port will reverse it!)
+    {-20, -3, -1},     // Left Chassis Ports (negative port will reverse it!)
+    {10, 13, 11},  // Right Chassis Ports (negative port will reverse it!)
 
     6,      // IMU Port
     3.25,  // Wheel Diameter (Remember, 4" wheels without screw holes are actually 4.125!)
@@ -363,10 +363,130 @@ void opcontrol() {
 
     mogo_clamp.button_toggle(master.get_digital(DIGITAL_X));
 
+
+    if (master.get_digital(DIGITAL_L1)) {
+      intake.move(127);
+    } 
+    else if (master.get_digital(DIGITAL_L2)) {
+      intake.move(-127);
+    } 
+    else {
+      intake.move(0);
+    }
+
+
     pros::delay(ez::util::DELAY_TIME);  // This is used for timer calculations!  Keep this ez::util::DELAY_TIME
   }
 
 }
+
+
+
+
+
+#include <cmath>
+#include <cstdlib>
+
+// Generate Gaussian random number with given mean (μ) and stddev (σ)
+double random_gaussian(double mean, double stddev) {
+    // Box-Muller transform
+    double u1 = (rand() + 1.0) / (RAND_MAX + 2.0); // avoid log(0)
+    double u2 = (rand() + 1.0) / (RAND_MAX + 2.0);
+
+    double z0 = sqrt(-2.0 * log(u1)) * cos(2 * M_PI * u2); // standard normal ~N(0,1)
+
+    return mean + z0 * stddev;
+}
+
+double gaussian(double x, double mean, double stddev) {
+    double exponent = -0.5 * pow((x - mean) / stddev, 2);
+    return (1.0 / (stddev * sqrt(2 * M_PI))) * exp(exponent);
+}
+
+
+
+double get_forward_movement_from_encoders() {
+    static double last_x = chassis.odom_x_get();
+    static double last_y = chassis.odom_y_get();
+
+    double current_x = chassis.odom_x_get();
+    double current_y = chassis.odom_y_get();
+
+    double dx = current_x - last_x;
+    double dy = current_y - last_y;
+    double theta = chassis.odom_theta_get() * M_PI / 180.0;
+
+    double forward_movement = dx * cos(theta) + dy * sin(theta);
+
+    last_x = current_x;
+    last_y = current_y;
+
+    return forward_movement; 
+}
+
+const double FIELD_HALF = 72.0; // Half of a 144-inch field
+
+double simulate_distance_sensor(double x, double y, double theta) {
+    // Ray direction vector
+    double sensor_offset_x = 1;
+    double sensor_offset_y = 1;
+    sensor_offset_theta = 0 * 180/3.14; // radians
+
+    // Rotate the sensor's local offset by the robot's orientation
+    x = x + sensor_offset_x * cos(theta) + sensor_offset_y * sin(theta);
+    y = y -  sensor_offset_x * sin(theta) + sensor_offset_y * cos(theta);
+    
+    // Adjust the sensor's orientation
+    theta = theta + sensor_offset_theta;
+
+    double dx = cos(theta);  // x-component
+    double dy = -   sin(theta);  // y-component
+
+
+    double t_min = 1e6; // large number for min distance
+
+    // Check intersection with top wall (y = +FIELD_HALF)
+    if (dy != 0) {
+        double t_top = (FIELD_HALF - y) / dy;
+        if (t_top > 0 && t_top < t_min) t_min = t_top;
+    }
+
+    // Bottom wall (y = -FIELD_HALF)
+    if (dy != 0) {
+        double t_bottom = (-FIELD_HALF - y) / dy;
+        if (t_bottom > 0 && t_bottom < t_min) t_min = t_bottom;
+    }
+
+    // Right wall (x = +FIELD_HALF)
+    if (dx != 0) {
+        double t_right = (FIELD_HALF - x) / dx;
+        if (t_right > 0 && t_right < t_min) t_min = t_right;
+    }
+
+    // Left wall (x = -FIELD_HALF)
+    if (dx != 0) {
+        double t_left = (-FIELD_HALF - x) / dx;
+        if (t_left > 0 && t_left < t_min) t_min = t_left;
+    }
+
+    return t_min; // distance to closest wall
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 void mcl() {
   //constants
@@ -431,21 +551,51 @@ void mcl() {
       particle p = particle_array[i];
       p.weight /= total_weight; // Normalize the weight
     }
-    
+
     //step 5: resample particles
     particle new_particles[NUM_PARTICLES];
-    double cummilative_weights[NUM_PARTICLES];
+    double cummulative_weights[NUM_PARTICLES];
     double cummulative_weight = 0.0;
+
     for (int i = 0; i < NUM_PARTICLES; i++) {
       particle p = particle_array[i];
       cummulative_weight += p.weight;
-      cummilative_weights[i] = cummulative_weight;
+      cummulative_weights[i] = cummulative_weight;
+    }
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+    double r = ((double) rand()) / RAND_MAX; // Random number between 0 and 1
+    int j = 0;
+    while (j < NUM_PARTICLES - 1 && r > cummulative_weights[j]) {
+        j++;
+    }
+    new_particles[i] = particle_array[j];
+}
+    // Copy new particles back to particle_array
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+      particle_array[i] = new_particles[i];
     }
 
 
 
+    //step 6: estimate
+    double estimated_x = 0.0;
+    double estimated_y = 0.0;
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+      particle p = particle_array[i];
+      estimated_x += p.x * p.weight; // Weighted average of x positions
+      estimated_y += p.y * p.weight; // Weighted average of y positions
+    }
 
-// unfinished
+  }
+
+}
+
+
+
+
+
+
+
   
 
 

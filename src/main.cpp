@@ -25,7 +25,211 @@ ez::Drive chassis(
 // ez::tracking_wheel horiz_tracker(8, 2.75, 4.0);  // This tracking wheel is perpendicular to the drive wheels
 // ez::tracking_wheel vert_tracker(9, 2.75, 4.0);   // This tracking wheel is parallel to the drive wheels
 
+// Helpers for MCL
+double random_uniform(double min, double max) {
+  return min + (double)rand() / RAND_MAX * (max - min);
+}
 
+double random_gaussian(double mean, double stddev) {
+    // Use Box-Muller transform
+    static bool hasSpare = false;
+    static double spare;
+    if (hasSpare) {
+        hasSpare = false;
+        return mean + stddev * spare;
+    }
+
+    hasSpare = true;
+    double u, v, s;
+    do {
+        u = 2.0 * ((double)rand() / RAND_MAX) - 1.0;
+        v = 2.0 * ((double)rand() / RAND_MAX) - 1.0;
+        s = u * u + v * v;
+    } while (s >= 1.0 || s == 0.0);
+
+    s = sqrt(-2.0 * log(s) / s);
+    spare = v * s;
+    return mean + stddev * (u * s);
+}
+
+double gaussian(double x, double mean, double stddev) {
+  double exponent = -((x - mean) * (x - mean)) / (2 * stddev * stddev);
+  return (1.0 / (stddev * sqrt(2 * M_PI))) * exp(exponent);
+}
+
+double simulate_distance_sensor(double x, double y, double robot_heading) {
+  // Simulate distance sensor reading based on robot position and heading
+  // Assuming field boundaries at x = ±72, y = ±72
+
+  // Sensor offset from robot center (in inches)
+  const double sensor_offset_x = -3;
+  const double sensor_offset_y = -4.75;
+  const double sensor_angle_offset_deg = 180;
+
+  const double FIELD_HALF = 72.0; // Half field size in inches
+
+  // Calculate sensor's global position, -robot_theta_rad is used since 
+  // robot_theta_rad is the clockwise angle but the rotation formulas
+  // assume counter-clockwise rotation.
+  double robot_theta_rad = robot_heading * M_PI / 180.0;
+  double sensor_global_x = x + sensor_offset_x * cos(-robot_theta_rad) - sensor_offset_y * sin(-robot_theta_rad);
+  double sensor_global_y = y + sensor_offset_x * sin(-robot_theta_rad) + sensor_offset_y * cos(-robot_theta_rad);
+
+  // Calculate sensor's global heading
+  double sensor_global_theta_rad = robot_theta_rad + sensor_angle_offset_deg * M_PI / 180.0;
+
+  // Calculate the direction vector based on the robot's orientation. x uses sin since
+  // robot heading is measured as clockwise from y axis
+  double dx = sin(sensor_global_theta_rad);
+  double dy = cos(sensor_global_theta_rad);
+
+  // Calculate intersection t for each wall
+  double t_top = (FIELD_HALF - sensor_global_y) / dy;
+  double t_bottom = (-FIELD_HALF - sensor_global_y) / dy;
+  double t_right = (FIELD_HALF - sensor_global_x) / dx;
+  double t_left = (-FIELD_HALF - sensor_global_x) / dx;
+  double t_min = 1000000.0; // Initialize to a large value
+  if (t_top > 0 && t_top < t_min) t_min = t_top;
+  if (t_bottom > 0 && t_bottom < t_min) t_min = t_bottom;
+  if (t_right > 0 && t_right < t_min) t_min = t_right;
+  if (t_left > 0 && t_left < t_min) t_min = t_left;
+
+  return t_min; // Distance to closest wall
+}
+
+int find_idx_in_cumulative(double* cumulative_weights, double r, int size) {
+  int i = 0;
+  while (r > cumulative_weights[i] && i < size - 1) {
+    i++;
+  }
+  return i;
+}
+
+double get_forward_movement() {
+    static double last_left = 0.0;
+    static double last_right = 0.0;
+
+    // Get current drive sensor values (in inches)
+    double curr_left = chassis.drive_sensor_left();
+    double curr_right = chassis.drive_sensor_right();
+
+    // Calculate average movement since last call
+    double delta_left = curr_left - last_left;
+    double delta_right = curr_right - last_right;
+    double delta_forward = (delta_left + delta_right) / 2.0;
+
+    // Update last values
+    last_left = curr_left;
+    last_right = curr_right;
+
+    return delta_forward;
+}
+
+double get_inertial_heading() {
+    return chassis.odom_theta_get();
+}
+
+void mcl() {
+  // Monte Carlo Localization
+  int NUM_PARTICLES = 100;
+  int SIGMA = 2.0; // Assumed sensor noise std in inches
+
+  typedef struct {
+    double x;
+    double y;
+    double weight;
+  } Particle;
+
+  // Initialization
+  Particle particles[NUM_PARTICLES];
+  for (int i = 0; i < NUM_PARTICLES; i++) {
+    particles[i].x = (double)(rand() % 144) - 72; // Random x in [-72, 72]
+    particles[i].y = (double)(rand() % 144) - 72; // Random y in [-72, 72]
+    particles[i].weight = 1.0 / NUM_PARTICLES;
+  }
+
+  // Main loop
+  while (true) {
+    // Step 1: Get robot movement and inertial heading
+    double delta_distance = get_forward_movement();
+    double robot_heading = get_inertial_heading();
+
+    // Step 2: Motion Update
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+      // Add noise to movement
+      double noisy_distance = delta_distance + random_gaussian(0, 0.5);
+      // IMPORTANT: sin is used for x since robot heading is measured as 
+      // clockwise from y axis
+      particles[i].x += noisy_distance * sin(robot_heading * M_PI / 180.0);
+      particles[i].y += noisy_distance * cos(robot_heading * M_PI / 180.0);
+      // Keep particles within field bounds
+      if (particles[i].x < -72) particles[i].x = -72;
+      if (particles[i].x > 72) particles[i].x = 72;
+      if (particles[i].y < -72) particles[i].y = -72;
+      if (particles[i].y > 72) particles[i].y = 72;
+    }
+
+    // Step 3: Sensor readings from robot
+    double sensor_distance = distance_sensor.get() / 25.4; // Convert mm to inches
+    if (sensor_distance < 20 || sensor_distance > 2000) {
+      pros::delay(100);
+      continue; // Skip this iteration if the value is invalid
+    }
+
+    // Step 4: Weighting
+    double total_weight = 0.0;
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+      double x = particles[i].x;
+      double y = particles[i].y;
+      
+      double expected_distance = simulate_distance_sensor(x, y, robot_heading);
+
+      double weight = 1.0;
+      double error = sensor_distance - expected_distance;
+      double prob = gaussian(error, 0, SIGMA);
+      weight *= prob;
+
+      particles[i].weight = weight;
+      total_weight += weight;
+    }
+
+    // Step 5: Normalize weights
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+      particles[i].weight /= total_weight;
+    }
+
+    // Step 6: Resample Particles
+    Particle new_particles[NUM_PARTICLES];
+    double cumulative_weights[NUM_PARTICLES];
+    double cumulative = 0.0;
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+      cumulative += particles[i].weight;
+      cumulative_weights[i] = cumulative;
+    }
+
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+      double r = random_uniform(0, 1);
+      int idx = find_idx_in_cumulative(cumulative_weights, r, NUM_PARTICLES);
+      Particle chosen = particles[idx];
+      new_particles[i] = {chosen.x, chosen.y, 1.0 / NUM_PARTICLES}; // Reset weight
+    }
+
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+      particles[i] = new_particles[i];
+    }
+
+    // Step 7: Estimate Position from particle average
+    double avg_x = 0.0;
+    double avg_y = 0.0;
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+      avg_x += particles[i].x;
+      avg_y += particles[i].y;
+    }
+    avg_x /= NUM_PARTICLES;
+    avg_y /= NUM_PARTICLES;
+    chassis.odom_xy_set(avg_x, avg_y);
+  }
+}
 
 void gpsupdate(){
  // return; // Comment this out if you want to use GPS
@@ -372,6 +576,18 @@ void opcontrol() {
     else {
       intake.move(0);
     }
+
+    if (master.get_digital(DIGITAL_R1)) {
+      conveyor.move(127);
+    } 
+    else if (master.get_digital(DIGITAL_R2)) {
+      conveyor.move(-127);
+    } 
+    else {
+      conveyor.move(0);
+    }
+
+    mid_goal_piston.button_toggle(master.get_digital(DIGITAL_A));
 
     pros::delay(ez::util::DELAY_TIME);  // This is used for timer calculations!  Keep this ez::util::DELAY_TIME
   }

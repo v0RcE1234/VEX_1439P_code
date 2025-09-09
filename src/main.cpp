@@ -188,13 +188,43 @@ void mcl() {
     }
 
     // Step 3: Sensor readings from robot
-    double sensor_distance = distance_sensor.get() / 25.4; // Convert mm to inches
-    if (sensor_distance < 20 || sensor_distance > 2000) {
+    double dist_mm = distance_sensor.get(); // Get value in mm
+    if (dist_mm < 20 || dist_mm > 2000) {
       pros::delay(100);
       continue; // Skip this iteration if the value is invalid
     }
+    double sensor_distance = dist_mm / 25.4; // Convert mm to inches
+
     double gps_x = gps1.get_position_x() * 39.3701; // meters to inches
     double gps_y = gps1.get_position_y() * 39.3701; // meters to inches
+    static int stuck_count = 0;
+    
+    // GPS validity checks
+    static double last_gps_x = 0, last_gps_y = 0;
+    const int STUCK_THRESHOLD = 10;
+    const double STUCK_EPSILON = 0.01;
+
+    if (fabs(gps_x - last_gps_x) < STUCK_EPSILON && fabs(gps_y - last_gps_y) < STUCK_EPSILON) {
+      stuck_count++;
+    } else {
+      stuck_count = 0;
+    }
+    last_gps_x = gps_x;
+    last_gps_y = gps_y;
+
+    bool gps_valid = true;
+    if (stuck_count > STUCK_THRESHOLD) {
+      gps_valid = false;
+      ez::screen_print("GPS STUCK!", 4);
+    }
+    if (gps_x < -72 || gps_x > 72 || gps_y < -72 || gps_y > 72) {
+      gps_valid = false;
+      ez::screen_print("GPS OUT OF BOUNDS!", 4);
+    }
+    if (std::isnan(gps_x) || std::isnan(gps_y)){
+      gps_valid = false;
+      ez::screen_print("GPS NAN!", 4);
+    }
 
     // Step 4: Weighting
     double total_weight = 0.0;
@@ -210,11 +240,13 @@ void mcl() {
       weight *= prob;
 
       // GPS weighting
-      double gps_error_x = gps_x - x;
-      double gps_error_y = gps_y - y;
-      double gps_prob_x = gaussian(gps_error_x, 0, SIGMA_GPS);
-      double gps_prob_y = gaussian(gps_error_y, 0, SIGMA_GPS);
-      weight *= gps_prob_x * gps_prob_y;
+      if (gps_valid) {
+        double gps_error_x = gps_x - x;
+        double gps_error_y = gps_y - y;
+        double gps_prob_x = gaussian(gps_error_x, 0, SIGMA_GPS);
+        double gps_prob_y = gaussian(gps_error_y, 0, SIGMA_GPS);
+        weight *= gps_prob_x * gps_prob_y;
+      }
 
       particles[i].weight = weight;
       total_weight += weight;
@@ -255,6 +287,20 @@ void mcl() {
     avg_x /= NUM_PARTICLES;
     avg_y /= NUM_PARTICLES;
     chassis.odom_xy_set(avg_x, avg_y);
+    
+    // Debug print
+    ez::screen_print("Est Pos x: " + std::to_string(avg_x) +
+                     " y: " + std::to_string(avg_y), 5);
+    // GPS debug print
+    ez::screen_print("GPS x: " + std::to_string(gps_x) +
+                     " y: " + std::to_string(gps_y), 6);
+    // Distance sensor debug print
+    ez::screen_print("DS: " + std::to_string(sensor_distance) +
+                     " Exp: " + std::to_string(simulate_distance_sensor(avg_x, avg_y, robot_heading)), 7);
+    // // GPS validity check
+    // if (std::isnan(gps_x) || std::isnan(gps_y)) {
+    //     ez::screen_print("GPS INVALID!", 4);
+    // }
 
     // Delay to maintain loop period
     int elapsed = pros::millis() - start_time;

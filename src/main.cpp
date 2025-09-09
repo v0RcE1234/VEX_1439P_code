@@ -13,7 +13,7 @@ ez::Drive chassis(
     {-20, -3, -1},     // Left Chassis Ports (negative port will reverse it!)
     {10, 13, 11},  // Right Chassis Ports (negative port will reverse it!)
 
-    6,      // IMU Port
+    18,      // IMU Port
     3.25,  // Wheel Diameter (Remember, 4" wheels without screw holes are actually 4.125!)
     450);   // Wheel RPM = cartridge * (motor gear / wheel gear)
 
@@ -62,8 +62,8 @@ double simulate_distance_sensor(double x, double y, double robot_heading) {
   // Assuming field boundaries at x = ±72, y = ±72
 
   // Sensor offset from robot center (in inches)
-  const double sensor_offset_x = -3;
-  const double sensor_offset_y = -4.75;
+  const double sensor_offset_x = -4.75;
+  const double sensor_offset_y = -8.5;
   const double sensor_angle_offset_deg = 180;
 
   const double FIELD_HALF = 72.0; // Half field size in inches
@@ -129,27 +129,45 @@ double get_inertial_heading() {
     return chassis.odom_theta_get();
 }
 
+const int NUM_PARTICLES = 100;
+typedef struct {
+  double x;
+  double y;
+  double weight;
+} Particle;
+Particle particles[NUM_PARTICLES];
+bool reset_particles_flag = false;
+double reset_x, reset_y, reset_spread;
+
 void mcl() {
   // Monte Carlo Localization
-  int NUM_PARTICLES = 100;
   int SIGMA = 2.0; // Assumed sensor noise std in inches
-
-  typedef struct {
-    double x;
-    double y;
-    double weight;
-  } Particle;
+  int SIGMA_GPS = 6.0; // Assumed GPS noise std in inches
+  int PERIOD_MS = 100; // Update period in ms
 
   // Initialization
-  Particle particles[NUM_PARTICLES];
   for (int i = 0; i < NUM_PARTICLES; i++) {
     particles[i].x = (double)(rand() % 144) - 72; // Random x in [-72, 72]
     particles[i].y = (double)(rand() % 144) - 72; // Random y in [-72, 72]
     particles[i].weight = 1.0 / NUM_PARTICLES;
   }
+  gps1.set_offset(-6.25 / 39.3701, 5.75 / 39.3701); // Offset from center of robot to GPS in meters. ASSUME ROBOT IS FACING GPS'S DIRECTION
 
   // Main loop
   while (true) {
+    // Start timing
+    int start_time = pros::millis();
+
+    // Handle reset request
+    if (reset_particles_flag) {
+      for (int i = 0; i < NUM_PARTICLES; i++) {
+        particles[i].x = reset_x + random_gaussian(0, reset_spread);
+        particles[i].y = reset_y + random_gaussian(0, reset_spread);
+        particles[i].weight = 1.0 / NUM_PARTICLES;
+      }
+      reset_particles_flag = false;
+    }
+
     // Step 1: Get robot movement and inertial heading
     double delta_distance = get_forward_movement();
     double robot_heading = get_inertial_heading();
@@ -175,6 +193,8 @@ void mcl() {
       pros::delay(100);
       continue; // Skip this iteration if the value is invalid
     }
+    double gps_x = gps1.get_position_x() * 39.3701; // meters to inches
+    double gps_y = gps1.get_position_y() * 39.3701; // meters to inches
 
     // Step 4: Weighting
     double total_weight = 0.0;
@@ -188,6 +208,13 @@ void mcl() {
       double error = sensor_distance - expected_distance;
       double prob = gaussian(error, 0, SIGMA);
       weight *= prob;
+
+      // GPS weighting
+      double gps_error_x = gps_x - x;
+      double gps_error_y = gps_y - y;
+      double gps_prob_x = gaussian(gps_error_x, 0, SIGMA_GPS);
+      double gps_prob_y = gaussian(gps_error_y, 0, SIGMA_GPS);
+      weight *= gps_prob_x * gps_prob_y;
 
       particles[i].weight = weight;
       total_weight += weight;
@@ -228,7 +255,20 @@ void mcl() {
     avg_x /= NUM_PARTICLES;
     avg_y /= NUM_PARTICLES;
     chassis.odom_xy_set(avg_x, avg_y);
+
+    // Delay to maintain loop period
+    int elapsed = pros::millis() - start_time;
+    if (elapsed < PERIOD_MS) {
+      pros::delay(PERIOD_MS - elapsed);
+    }
   }
+}
+
+void request_particle_init(double start_x, double start_y, double spread = 0.0) {
+  reset_x = start_x;
+  reset_y = start_y;
+  reset_spread = spread;
+  reset_particles_flag = true;
 }
 
 void gpsupdate(){
@@ -386,6 +426,14 @@ void initialize() {
   chassis.initialize();
   ez::as::initialize();
   master.rumble(chassis.drive_imu_calibrated() ? "." : "---");
+
+  // Start tasks
+  pros::Task mcl_task(mcl);
+  // Initalize all cordinate systems to starting pose of robot. Following code assumes 0, 0, 0, but this
+  // templated should be changed in each autonomous to the desired starting pose
+  request_particle_init(0.0, 24.0); // Robot starts at (0,0) with no spread
+  gps1.set_position(0, 24 / 39.3701, 270); // FOR ORIENTATION, ASSUME ROBOT IS FACING GPS'S DIRECTION. EX, IF GPS IS MOUNTED ON LEFT, ORIENTATION IS ORIENTATION OF ROBOT - 90
+  chassis.odom_xyt_set(0_in, 24_in, 0_deg);
 }
 
 /**

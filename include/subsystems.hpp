@@ -20,3 +20,6 @@ inline pros::Motor conveyor_top(4);
 inline pros::Motor conveyor_bottom(7);
 inline pros::MotorGroup conveyor({4, 7});
 inline ez::Piston mid_goal_piston('A');
+inline pros::Motor basket(2);
+inline pros::Motor intake_bottom(12);
+inline pros::Motor intake_top(7);

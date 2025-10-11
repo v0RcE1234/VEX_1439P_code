@@ -661,25 +661,60 @@ void opcontrol() {
 
     mogo_clamp.button_toggle(master.get_digital(DIGITAL_X));
 
-    if (master.get_digital(DIGITAL_L1)) {
-      intake.move(127);
-    } 
-    else if (master.get_digital(DIGITAL_L2)) {
-      intake.move(-127);
-    } 
-    else {
-      intake.move(0);
-    }
+    // if (master.get_digital(DIGITAL_L1)) {
+    //   basket.move(127);
+    // } 
+    // else if (master.get_digital(DIGITAL_L2)) {
+    //   basket.move(-127);
+    // } 
+    // else {
+    //   basket.move(0);
+    // }
 
-    if (master.get_digital(DIGITAL_R1)) {
-      conveyor.move(127);
+    // if (master.get_digital(DIGITAL_R1)) {
+    //   intake_bottom.move(127);
+    // } 
+    // else if (master.get_digital(DIGITAL_R2)) {
+    //   intake_bottom.move(-127);
+    // } 
+    // else {
+    //   intake_bottom.move(0);
+    // }
+
+    // if (master.get_digital(DIGITAL_UP)) {
+    //   intake_top.move(127);
+    // } 
+    // else if (master.get_digital(DIGITAL_DOWN)) {
+    //   intake_top.move(-127);
+    // } 
+    // else {
+    //   intake_top.move(0);
+    // }
+
+    if (master.get_digital(DIGITAL_R1)) { // to basket
+      intake_bottom.move(127);
+      basket.move(127);
+      intake_top.move(127);
     } 
-    else if (master.get_digital(DIGITAL_R2)) {
-      conveyor.move(-127);
-    } 
-    else {
-      conveyor.move(0);
+    else if (master.get_digital(DIGITAL_R2)) { // low goal
+      intake_bottom.move(-127);
+      basket.move(-127);
+      intake_top.move(127);
     }
+    else if (master.get_digital(DIGITAL_L1)) { // mid goal
+      intake_bottom.move(127);
+      basket.move(-127);
+      intake_top.move(127);
+    } else if (master.get_digital(DIGITAL_L2)) { // top goal
+      intake_bottom.move(127);
+      basket.move(-127);
+      intake_top.move(-127);
+    } else {
+      intake_bottom.move(0);
+      basket.move(0);
+      intake_top.move(0);
+    }
+    
 
     mid_goal_piston.button_toggle(master.get_digital(DIGITAL_A));
 

@@ -659,7 +659,7 @@ void opcontrol() {
     // Put more user control code here!
     // . . .
 
-    mogo_clamp.button_toggle(master.get_digital(DIGITAL_X));
+    // mogo_clamp.button_toggle(master.get_digital(DIGITAL_X));
 
     // if (master.get_digital(DIGITAL_L1)) {
     //   basket.move(127);
@@ -716,7 +716,9 @@ void opcontrol() {
     }
     
 
-    mid_goal_piston.button_toggle(master.get_digital(DIGITAL_A));
+    // mid_goal_piston.button_toggle(master.get_digital(DIGITAL_A));
+    aligner.button_toggle(master.get_digital(DIGITAL_B));
+    matchloader.button_toggle(master.get_digital(DIGITAL_A));
 
     pros::delay(ez::util::DELAY_TIME);  // This is used for timer calculations!  Keep this ez::util::DELAY_TIME
   }

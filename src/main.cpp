@@ -720,10 +720,241 @@ void opcontrol() {
     aligner.button_toggle(master.get_digital(DIGITAL_B));
     matchloader.button_toggle(master.get_digital(DIGITAL_A));
 
+
+    if (master.get_digital(DIGITAL_L1)) {
+      intake.move(127);
+    } 
+    else if (master.get_digital(DIGITAL_L2)) {
+      intake.move(-127);
+    } 
+    else {
+      intake.move(0);
+    }
+
+
     pros::delay(ez::util::DELAY_TIME);  // This is used for timer calculations!  Keep this ez::util::DELAY_TIME
   }
 
 }
+
+
+
+
+
+#include <cmath>
+#include <cstdlib>
+
+// Generate Gaussian random number with given mean (μ) and stddev (σ)
+double random_gaussian(double mean, double stddev) {
+    // Box-Muller transform
+    double u1 = (rand() + 1.0) / (RAND_MAX + 2.0); // avoid log(0)
+    double u2 = (rand() + 1.0) / (RAND_MAX + 2.0);
+
+    double z0 = sqrt(-2.0 * log(u1)) * cos(2 * M_PI * u2); // standard normal ~N(0,1)
+
+    return mean + z0 * stddev;
+}
+
+double gaussian(double x, double mean, double stddev) {
+    double exponent = -0.5 * pow((x - mean) / stddev, 2);
+    return (1.0 / (stddev * sqrt(2 * M_PI))) * exp(exponent);
+}
+
+
+
+double get_forward_movement_from_encoders() {
+    static double last_x = chassis.odom_x_get();
+    static double last_y = chassis.odom_y_get();
+
+    double current_x = chassis.odom_x_get();
+    double current_y = chassis.odom_y_get();
+
+    double dx = current_x - last_x;
+    double dy = current_y - last_y;
+    double theta = chassis.odom_theta_get() * M_PI / 180.0;
+
+    double forward_movement = dx * cos(theta) + dy * sin(theta);
+
+    last_x = current_x;
+    last_y = current_y;
+
+    return forward_movement; 
+}
+
+const double FIELD_HALF = 72.0; // Half of a 144-inch field
+
+double simulate_distance_sensor(double x, double y, double theta) {
+    // Ray direction vector
+    double sensor_offset_x = 1;
+    double sensor_offset_y = 1;
+    sensor_offset_theta = 0 * 180/3.14; // radians
+
+    // Rotate the sensor's local offset by the robot's orientation
+    x = x + sensor_offset_x * cos(theta) + sensor_offset_y * sin(theta);
+    y = y -  sensor_offset_x * sin(theta) + sensor_offset_y * cos(theta);
+    
+    // Adjust the sensor's orientation
+    theta = theta + sensor_offset_theta;
+
+    double dx = cos(theta);  // x-component
+    double dy = -   sin(theta);  // y-component
+
+
+    double t_min = 1e6; // large number for min distance
+
+    // Check intersection with top wall (y = +FIELD_HALF)
+    if (dy != 0) {
+        double t_top = (FIELD_HALF - y) / dy;
+        if (t_top > 0 && t_top < t_min) t_min = t_top;
+    }
+
+    // Bottom wall (y = -FIELD_HALF)
+    if (dy != 0) {
+        double t_bottom = (-FIELD_HALF - y) / dy;
+        if (t_bottom > 0 && t_bottom < t_min) t_min = t_bottom;
+    }
+
+    // Right wall (x = +FIELD_HALF)
+    if (dx != 0) {
+        double t_right = (FIELD_HALF - x) / dx;
+        if (t_right > 0 && t_right < t_min) t_min = t_right;
+    }
+
+    // Left wall (x = -FIELD_HALF)
+    if (dx != 0) {
+        double t_left = (-FIELD_HALF - x) / dx;
+        if (t_left > 0 && t_left < t_min) t_min = t_left;
+    }
+
+    return t_min; // distance to closest wall
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void mcl() {
+  //constants
+  const int NUM_PARTICLES = 50;
+  const double SIGMA = 2.0; //Assumed standard deviation of the sensor noise in inches
+
+  // particle structure: [x, y, weight]
+  // no theta, since we assume the imu is always correct
+  typedef struct particle {
+    double x;
+    double y;
+    double weight;
+  } particle;
+
+  // initilization
+  particle particle_array[NUM_PARTICLES];
+  for (int i = 0; i < NUM_PARTICLES; i++) {
+    double x = rand() * 144 - 72; // Random x position between -72 and 72
+    double y = rand() * 144 - 72; // Random y position between -72 and 72
+    double weight = 1.0 / NUM_PARTICLES; // Initial weight is uniform
+    particle_array[i] = {x, y, weight};
+  }
+  // Main loop
+  while(true){
+    //step 1: get robot movement and initial heading
+    double delta_distance = get_forward_movement_from_encoders(); // Get the forward movement from encoders
+    double robot_heading = (90 - chassis.odom_theta_get()) * M_PI/180; // Get the robot's heading from the IMU
+    
+    //step 2: motion update
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+      particle p = particle_array[i];
+      double x = p.x;
+      double y = p.y;
+      double w = p.weight;
+      // add some noise to the distance moved
+      double noisy_distance = delta_distance + random_gaussian(0, 0.5);
+      double dx = noisy_distance * cos(robot_heading);
+      double dy = noisy_distance * sin(robot_heading);
+      p.x += dx;
+      p.y += dy;
+    }
+
+
+    //step 3: simulate sensor values from this pose, weighting
+    double total_weight = 0.0;
+    for(int i = 0; i < NUM_PARTICLES; i++) {
+      particle p = particle_array[i];
+      double x = p.x;
+      double y = p.y;
+      double theta = robot_heading;
+      
+      double weight = 1.0;
+      double distance_sensor_error = distance_sensor.get() / 25.4 - simulate_distance_sensor(x, y, theta); // Convert mm to inches
+      double prob = gaussian(distance_sensor_error, 0, SIGMA); // Calculate the probability of the sensor value given the pose
+      weight *= prob; // Update the weight of the particle 
+      
+      p.weight = weight; // Update the particle's weight 
+    }
+
+    //step 4: normalize weights
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+      particle p = particle_array[i];
+      p.weight /= total_weight; // Normalize the weight
+    }
+
+    //step 5: resample particles
+    particle new_particles[NUM_PARTICLES];
+    double cummulative_weights[NUM_PARTICLES];
+    double cummulative_weight = 0.0;
+
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+      particle p = particle_array[i];
+      cummulative_weight += p.weight;
+      cummulative_weights[i] = cummulative_weight;
+    }
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+    double r = ((double) rand()) / RAND_MAX; // Random number between 0 and 1
+    int j = 0;
+    while (j < NUM_PARTICLES - 1 && r > cummulative_weights[j]) {
+        j++;
+    }
+    new_particles[i] = particle_array[j];
+}
+    // Copy new particles back to particle_array
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+      particle_array[i] = new_particles[i];
+    }
+
+
+
+    //step 6: estimate
+    double estimated_x = 0.0;
+    double estimated_y = 0.0;
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+      particle p = particle_array[i];
+      estimated_x += p.x * p.weight; // Weighted average of x positions
+      estimated_y += p.y * p.weight; // Weighted average of y positions
+    }
+
+  }
+
+}
+
+
+
+
+
+
+
+  
+
 
 
 
